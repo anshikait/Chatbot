@@ -1,0 +1,48 @@
+datasets:
+  symptoms:
+    layer: "clinical"
+    category: "disease"
+    source: "symptom2disease"
+    priority: "normal"
+    required_cols: ["label", "text"]
+    semantic_template: "Disease: {label}. Symptoms: {text}. Treatment: hydration and monitoring."
+  
+  medicine:
+    layer: "clinical"
+    category: "medication"
+    source: "drugbank"
+    priority: "high"
+    required_cols:["drug_name", "indication", "toxicity"]
+    semantic_template: "Medicine: {drug_name}. Uses: {indication}. Warning: {toxicity}. Avoid overdose."
+  
+  doctorqa:
+    layer: "clinical"
+    category: "consultation"
+    source: "meddialog"
+    priority: "normal"
+    required_cols:["patient_query", "doctor_response"]
+    semantic_template: "Question: {patient_query} Doctor Response: {doctor_response}. Consult physician if symptoms persist."
+  
+  emergency:
+    layer: "clinical"
+    category: "emergency"
+    source: "mimic_iv_triage"
+    priority: "high"
+    required_cols: ["chief_complaint", "acuity_level"]
+    semantic_template: "Symptoms: {chief_complaint}. Risk Level: {acuity_level}. Advice: seek emergency care immediately."
+
+  ayurveda:
+    layer: "wellness"
+    category: "ayurveda"
+    source: "ayush_curated"
+    priority: "low"
+    required_cols: ["condition", "treatment"]
+    semantic_template: "Condition: {condition}. Ayurvedic Support: {treatment}. Source: AYUSH. Note: This is traditional wellness support, not a clinical replacement."
+  
+  home_remedy:
+    layer: "wellness"
+    category: "home_remedy"
+    source: "curated_remedies"
+    priority: "low"
+    required_cols: ["issue", "remedy"]
+    semantic_template: "Condition: {issue}. Home Remedy: {remedy}. Caution: Seek medical advice if symptoms worsen."
