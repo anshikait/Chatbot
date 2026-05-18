@@ -1,0 +1,56 @@
+datasets:
+  # --- CLINICAL LAYER ---
+  symptoms:
+    namespace: "clinical"
+    layer: "clinical"
+    category: "disease"
+    source: "symptoms_dataset"
+    priority: "high"
+    required_cols: ["disease", "symptoms"]
+    semantic_template: "Disease: {disease}.\nSymptoms: {symptoms}.\nAdvice: hydration and monitoring."
+
+  medicine:
+    namespace: "clinical"
+    layer: "clinical"
+    category: "medication"
+    source: "DrugsComMerged"
+    priority: "high"
+    required_cols: ["drugName", "condition", "review"]
+    semantic_template: "Medicine: {drugName}.\nUsed for: {condition}.\nPatient Review: {review}."
+
+  doctorqa:
+    namespace: "conversation"
+    layer: "clinical"
+    category: "consultation"
+    source: "chatdoctor"
+    priority: "normal"
+    required_cols: ["patient_query", "doctor_response"]
+    semantic_template: "Patient Question:\n{patient_query}\n\nDoctor Response:\n{doctor_response}"
+
+  medquad:
+    namespace: "medicalqa"
+    layer: "clinical"
+    category: "qa"
+    source: "medquad"
+    priority: "high"
+    required_cols: ["question", "answer"]
+    semantic_template: "Medical Question:\n{question}\n\nMedical Answer:\n{answer}"
+
+  # --- WELLNESS LAYER ---
+  ayurveda:
+    namespace: "wellness"
+    layer: "wellness"
+    category: "ayurveda"
+    source: "AyurvedaMerged"
+    priority: "low"
+    required_cols: ["condition", "treatment"]
+    semantic_template: "Condition:\n{condition}\n\nAyurvedic Support:\n{treatment}\n\nSource:\nAYUSH\n\nIMPORTANT: This is wellness support and not a replacement for professional medical treatment."
+
+  home_remedy:
+    namespace: "wellness"
+    layer: "wellness"
+    category: "remedy"
+    source: "ayurvedic_remedies"
+    priority: "low"
+    required_cols: ["issue", "remedy"]
+    semantic_template: "Condition:\n{issue}\n\nHome Remedy:\n{remedy}\n\nCaution:\nSeek medical care if symptoms worsen."

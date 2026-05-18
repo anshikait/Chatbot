@@ -29,7 +29,7 @@ def generate_medical_response(system_prompt: str, user_query: str, base64_image:
                 ]
             }
         ]
-        model = "llama-3.2-11b-vision-preview" # Groq vision model
+        model = "llama-3.3-70b-versatile" # Groq vision model
     else:
         messages =[
             {"role": "system", "content": enhanced_prompt},
