@@ -1,1 +1,7 @@
 .env
+
+# Dataset files
+*.csv
+
+# Optional large folders
+backend/app/data/
