@@ -12,7 +12,7 @@ export default function Landing() {
     {
       icon: "💬",
       title: "Natural conversations",
-      desc: "Chat naturally with context-aware AI that remembers your conversation.",
+      desc: "bot naturally with context-aware AI that remembers your conversation.",
     },
     {
       icon: "🔒",
@@ -72,7 +72,7 @@ export default function Landing() {
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
           </div>
-          <span style={{ fontSize: "1rem", fontWeight: 600, color: "#f1f5f9" }}>Chatbot AI</span>
+          <span style={{ fontSize: "1rem", fontWeight: 600, color: "#f1f5f9" }}>DoctorEase</span>
         </div>
         <div style={{ display: "flex", gap: "0.625rem" }}>
           <button onClick={() => navigate("/login")} style={{
@@ -199,7 +199,7 @@ export default function Landing() {
               <div key={i} style={{ width: "10px", height: "10px", borderRadius: "50%", background: c }} />
             ))}
             <div style={{ flex: 1, textAlign: "center", fontSize: "0.75rem", color: "#334155" }}>
-              chatbot.ai — New conversation
+              DoctorEase — New conversation
             </div>
           </div>
           {/* Fake messages */}
@@ -319,7 +319,7 @@ export default function Landing() {
         color: "#1e293b",
         fontSize: "0.8rem",
       }}>
-        © {new Date().getFullYear()} Chatbot AI — Built with ❤️
+        © {new Date().getFullYear()} DoctorEase — Built with ❤️
       </footer>
     </div>
   );
