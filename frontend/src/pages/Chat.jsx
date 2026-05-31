@@ -292,6 +292,7 @@ export default function Chat() {
         needs_map:      data.needs_map,
         image_type:     data.image_type,
         audioBase64:    data.audio_base64,
+        userLocation:   data.user_location,  // ✅ Pass location from backend
       }]);
 
       if (data.audio_base64) {
@@ -502,7 +503,7 @@ export default function Chat() {
                       />
                     )}
 
-                    {msg.needs_map && <MapWidget />}
+                    {msg.needs_map && <MapWidget userLocation={msg.userLocation} />}
                   </div>
                 )}
               </div>
