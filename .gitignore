@@ -17,6 +17,3 @@ demo/
 
 # Cache
 .cache/
-
-# Large folders
-app/data/
