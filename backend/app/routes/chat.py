@@ -1,7 +1,7 @@
 """
-chat.py — Main chat router
-PDF fix: Groq vision does NOT accept application/pdf directly.
-We convert the first page to a JPEG image using pdf2image, then send that.
+chat.py — Main chat router with improved PDF handling
+Uses: PyPDF (text extraction) + PyMuPDF/fitz (image rendering)
+Auto-fills user location for clinic/hospital queries
 """
 
 import uuid
@@ -14,42 +14,126 @@ from app.services.speech_service import transcribe_audio
 from app.services.rag_service import build_rag_prompt
 from app.services.groq_service import generate_medical_response
 from app.services.tts_service import text_to_speech_base64
-from app.services.mongo_service import chats_collection
+from app.services.mongo_service import chats_collection, profiles_collection
 from app.services.pinecone_service import upsert_embedding
 
 router = APIRouter()
 
 
-def pdf_bytes_to_jpeg_base64(pdf_bytes: bytes) -> str:
+def extract_pdf_content(pdf_bytes: bytes) -> dict:
     """
-    Convert the first page of a PDF to a JPEG base64 string.
-    Requires: pdf2image + poppler installed.
-    Falls back to OCR text extraction if pdf2image is unavailable.
+    Extract content from PDF using multiple strategies.
+    Returns: {
+        "text": extracted_text_or_error_msg,
+        "image_base64": base64_image_of_first_page_or_none,
+        "image_mime": "image/jpeg" or None,
+        "success": bool
+    }
     """
+    result = {
+        "text": "",
+        "image_base64": None,
+        "image_mime": "image/jpeg",
+        "success": False
+    }
+
+    # ─────────────────────────────────────────────────────────────
+    # Strategy 1: PyMuPDF (fitz) — render first page as JPEG image
+    # ─────────────────────────────────────────────────────────────
     try:
-        from pdf2image import convert_from_bytes
-        images = convert_from_bytes(pdf_bytes, first_page=1, last_page=1, dpi=200)
-        if images:
-            buf = io.BytesIO()
-            images[0].save(buf, format="JPEG", quality=90)
-            return base64.b64encode(buf.getvalue()).decode("utf-8")
+        import fitz  # PyMuPDF
+        pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        
+        if len(pdf_doc) > 0:
+            # Render first page at 150 DPI (300x400 @ DPI → ~1200x1600 pixels)
+            page = pdf_doc[0]
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)  # 2x zoom
+            
+            # Convert to JPEG
+            img_bytes = pix.tobytes("jpeg")
+            result["image_base64"] = base64.b64encode(img_bytes).decode("utf-8")
+            result["image_mime"] = "image/jpeg"
+            print(f"[PDF] ✅ Rendered first page to JPEG via PyMuPDF ({len(img_bytes)} bytes)")
+        
+        pdf_doc.close()
     except Exception as e:
-        print(f"[PDF→JPEG] pdf2image failed: {e}")
+        print(f"[PDF] PyMuPDF image rendering failed: {e}")
 
-    # Fallback: try pytesseract OCR on raw bytes treated as image
+    # ─────────────────────────────────────────────────────────────
+    # Strategy 2: PyPDF — extract text from all pages
+    # ─────────────────────────────────────────────────────────────
     try:
-        from PIL import Image
-        import pytesseract
-        img = Image.open(io.BytesIO(pdf_bytes))
-        text = pytesseract.image_to_string(img)
-        # encode the extracted text as a plain JPEG of the image
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG")
-        return base64.b64encode(buf.getvalue()).decode("utf-8")
-    except Exception as e2:
-        print(f"[PDF→JPEG] OCR fallback failed: {e2}")
+        from pypdf import PdfReader
+        pdf_reader = PdfReader(io.BytesIO(pdf_bytes))
+        
+        text_parts = []
+        num_pages = len(pdf_reader.pages)
+        
+        # Extract text from first 5 pages (avoid huge PDFs)
+        for page_num in range(min(5, num_pages)):
+            try:
+                page = pdf_reader.pages[page_num]
+                text = page.extract_text() or ""
+                if text.strip():
+                    text_parts.append(f"--- Page {page_num + 1} ---\n{text}")
+            except Exception as pe:
+                print(f"[PDF] Error extracting page {page_num}: {pe}")
+                continue
+        
+        if text_parts:
+            extracted_text = "\n\n".join(text_parts)
+            result["text"] = extracted_text
+            result["success"] = True
+            print(f"[PDF] ✅ Extracted {len(extracted_text)} chars via PyPDF from {num_pages} pages")
+            return result
+    except Exception as e:
+        print(f"[PDF] PyPDF text extraction failed: {e}")
 
-    return None
+    # ─────────────────────────────────────────────────────────────
+    # Strategy 3: pdfplumber — structured text extraction
+    # ─────────────────────────────────────────────────────────────
+    try:
+        import pdfplumber
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            text_parts = []
+            
+            for page_num, page in enumerate(pdf.pages[:5]):
+                try:
+                    text = page.extract_text() or ""
+                    tables = page.extract_tables()
+                    
+                    if text.strip():
+                        text_parts.append(f"--- Page {page_num + 1} ---\n{text}")
+                    
+                    if tables:
+                        text_parts.append(f"[Tables found on page {page_num + 1}]")
+                except Exception as pe:
+                    print(f"[PDF] pdfplumber page {page_num} failed: {pe}")
+                    continue
+            
+            if text_parts:
+                extracted_text = "\n\n".join(text_parts)
+                result["text"] = extracted_text
+                result["success"] = True
+                print(f"[PDF] ✅ Extracted via pdfplumber ({len(extracted_text)} chars)")
+                return result
+    except Exception as e:
+        print(f"[PDF] pdfplumber failed: {e}")
+
+    # ─────────────────────────────────────────────────────────────
+    # Fallback: If we have image but no text
+    # ─────────────────────────────────────────────────────────────
+    if result["image_base64"]:
+        result["text"] = "[PDF rendered as image — visual content analyzed by AI]"
+        result["success"] = True
+        print("[PDF] ✅ Falling back to image-only mode")
+        return result
+
+    # Everything failed
+    result["text"] = "⚠️ Could not extract text from PDF. Please try uploading as JPG/PNG instead."
+    result["success"] = False
+    print("[PDF] ❌ All extraction methods failed")
+    return result
 
 
 # ─────────────────────────────────────────────────────────────
@@ -99,8 +183,8 @@ async def chat(
     language:   str        = Form("English"),
     session_id: str        = Form(None),
     audio:      UploadFile = File(None),
-    image:      UploadFile = File(None),   # skin photo / scan
-    report:     UploadFile = File(None),   # lab report / PDF
+    image:      UploadFile = File(None),
+    report:     UploadFile = File(None),
     user_id:    str        = Depends(get_current_user)
 ):
     user_query   = message or ""
@@ -108,6 +192,19 @@ async def chat(
     has_report   = False
     base64_image = None
     image_mime   = "image/jpeg"
+    user_location = {}  # Will be populated from profile
+
+    # ── Retrieve user location from profile ──────────────────
+    try:
+        profile = profiles_collection.find_one({"user_id": user_id})
+        if profile:
+            user_location = {
+                "city": profile.get("city", ""),
+                "state": profile.get("state", ""),
+                "country": "India",  # Adjust if needed
+            }
+    except Exception as e:
+        print(f"[PROFILE] Could not fetch location: {e}")
 
     # ── 1. Audio transcription ───────────────────────────────
     if audio:
@@ -136,24 +233,20 @@ async def chat(
         has_report   = True
 
         if fname.endswith(".pdf"):
-            # ✅ FIX: Convert PDF first page → JPEG so vision model can read it
-            converted = pdf_bytes_to_jpeg_base64(report_bytes)
-            if converted:
-                base64_image = converted
-                image_mime   = "image/jpeg"
+            # ✅ USE PyPDF + PyMuPDF for PDF extraction
+            pdf_content = extract_pdf_content(report_bytes)
+            
+            if pdf_content["image_base64"]:
+                base64_image = pdf_content["image_base64"]
+                image_mime   = pdf_content["image_mime"]
                 has_image    = True
-            else:
-                # Could not convert — tell the user
-                return {
-                    "session_id":    session_id or str(uuid.uuid4()),
-                    "query":         user_query,
-                    "response":      "⚠️ Could not process the PDF. Please make sure poppler is installed on the server, or upload the report as an image (JPG/PNG).",
-                    "risk_level":    "LOW",
-                    "explainability": "",
-                    "needs_map":     False,
-                    "image_type":    "PDF_REPORT",
-                    "audio_base64":  None,
-                }
+            
+            # Prepend extracted text to the query
+            if pdf_content["text"]:
+                user_query = f"{pdf_content['text']}\n\n{user_query}".strip()
+            
+            if not user_query:
+                user_query = "Please analyze this medical report and explain all findings in detail."
         else:
             # Image-based report (photo of a report / scan)
             base64_image = base64.b64encode(report_bytes).decode("utf-8")
@@ -162,8 +255,8 @@ async def chat(
             else:                         image_mime = "image/jpeg"
             has_image = True
 
-        if not user_query:
-            user_query = "Please analyze this medical report and explain all findings in detail."
+            if not user_query:
+                user_query = "Please analyze this medical report and explain all findings in detail."
 
     # ── 4. Guard ─────────────────────────────────────────────
     if not user_query and not base64_image:
@@ -180,7 +273,7 @@ async def chat(
         "message":    user_query,
         "has_image":  has_image,
         "has_report": has_report,
-        "created_at": datetime.datetime.utcnow(),
+        "created_at": datetime.datetime.utcnow()
     })
 
     upsert_embedding(user_id, "chat", f"User asks: {user_query}")
@@ -193,6 +286,12 @@ async def chat(
         has_report=has_report,
         has_image=has_image,
     )
+
+    # ✅ Auto-fill location context if asking about clinics/hospitals
+    if user_location.get("city") and user_location.get("state"):
+        location_keywords = ["clinic", "hospital", "doctor", "nearby", "near me", "location", "appointment"]
+        if any(kw in user_query.lower() for kw in location_keywords):
+            system_prompt += f"\n\nNote: The user is located in {user_location['city']}, {user_location['state']}, {user_location['country']}. Provide clinic/hospital recommendations relevant to their location."
 
     # ── 8. Generate AI response ───────────────────────────────
     llm_output = generate_medical_response(
@@ -223,7 +322,7 @@ async def chat(
         "image_type":   image_type,
         "needs_map":    needs_map,
         "audio_base64": audio_base64,
-        "created_at":   datetime.datetime.utcnow(),
+        "created_at":   datetime.datetime.utcnow()
     })
 
     upsert_embedding(user_id, "reply", f"AI answered: {response_text}")
@@ -238,4 +337,5 @@ async def chat(
         "needs_map":      needs_map,
         "image_type":     image_type,
         "audio_base64":   audio_base64,
+        "user_location":  user_location,  # ✅ Pass location to frontend
     }
