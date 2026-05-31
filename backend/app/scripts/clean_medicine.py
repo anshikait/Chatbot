@@ -1,5 +1,5 @@
 import pandas as pd
-from utils import process_dataset_in_chunks
+from backend.app.utils.scripts.utils import process_dataset_in_chunks
 
 # Merge raw files first
 train = pd.read_csv("data/raw/clinical/drugsComTrain_raw.csv")

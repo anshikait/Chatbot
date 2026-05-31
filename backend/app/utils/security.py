@@ -15,7 +15,13 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def create_access_token(data: dict):
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(days=7)
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire, "type": "access"})
+    return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+def create_reset_token(email: str) -> str:
+    """Short-lived 15-minute token for password reset."""
+    expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode = {"sub": email, "exp": expire, "type": "reset"}
     return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 def decode_token(token: str):
@@ -24,3 +30,12 @@ def decode_token(token: str):
         return payload
     except jwt.PyJWTError:
         return None
+
+def decode_reset_token(token: str):
+    """Decode and validate a password-reset token. Returns email or None."""
+    payload = decode_token(token)
+    if not payload:
+        return None
+    if payload.get("type") != "reset":
+        return None
+    return payload.get("sub")  # email

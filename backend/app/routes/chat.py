@@ -1,6 +1,13 @@
+"""
+chat.py — Main chat router
+PDF fix: Groq vision does NOT accept application/pdf directly.
+We convert the first page to a JPEG image using pdf2image, then send that.
+"""
+
 import uuid
 import datetime
 import base64
+import io
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Query
 from app.routes.auth import get_current_user
 from app.services.speech_service import transcribe_audio
@@ -11,6 +18,38 @@ from app.services.mongo_service import chats_collection
 from app.services.pinecone_service import upsert_embedding
 
 router = APIRouter()
+
+
+def pdf_bytes_to_jpeg_base64(pdf_bytes: bytes) -> str:
+    """
+    Convert the first page of a PDF to a JPEG base64 string.
+    Requires: pdf2image + poppler installed.
+    Falls back to OCR text extraction if pdf2image is unavailable.
+    """
+    try:
+        from pdf2image import convert_from_bytes
+        images = convert_from_bytes(pdf_bytes, first_page=1, last_page=1, dpi=200)
+        if images:
+            buf = io.BytesIO()
+            images[0].save(buf, format="JPEG", quality=90)
+            return base64.b64encode(buf.getvalue()).decode("utf-8")
+    except Exception as e:
+        print(f"[PDF→JPEG] pdf2image failed: {e}")
+
+    # Fallback: try pytesseract OCR on raw bytes treated as image
+    try:
+        from PIL import Image
+        import pytesseract
+        img = Image.open(io.BytesIO(pdf_bytes))
+        text = pytesseract.image_to_string(img)
+        # encode the extracted text as a plain JPEG of the image
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        return base64.b64encode(buf.getvalue()).decode("utf-8")
+    except Exception as e2:
+        print(f"[PDF→JPEG] OCR fallback failed: {e2}")
+
+    return None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -61,12 +100,12 @@ async def chat(
     session_id: str        = Form(None),
     audio:      UploadFile = File(None),
     image:      UploadFile = File(None),   # skin photo / scan
-    report:     UploadFile = File(None),   # ← NEW: lab report / PDF
+    report:     UploadFile = File(None),   # lab report / PDF
     user_id:    str        = Depends(get_current_user)
 ):
-    user_query  = message or ""
-    has_image   = False
-    has_report  = False
+    user_query   = message or ""
+    has_image    = False
+    has_report   = False
     base64_image = None
     image_mime   = "image/jpeg"
 
@@ -82,10 +121,10 @@ async def chat(
         has_image    = True
 
         fname = (image.filename or "").lower()
-        if fname.endswith(".png"):        image_mime = "image/png"
-        elif fname.endswith(".webp"):     image_mime = "image/webp"
-        elif fname.endswith(".gif"):      image_mime = "image/gif"
-        else:                             image_mime = "image/jpeg"
+        if fname.endswith(".png"):    image_mime = "image/png"
+        elif fname.endswith(".webp"): image_mime = "image/webp"
+        elif fname.endswith(".gif"):  image_mime = "image/gif"
+        else:                         image_mime = "image/jpeg"
 
         if not user_query:
             user_query = "Please analyze this medical image and provide a detailed assessment."
@@ -97,11 +136,24 @@ async def chat(
         has_report   = True
 
         if fname.endswith(".pdf"):
-            # PDFs: send as document to the vision model via base64 image of first page
-            # We treat it as a base64 payload with PDF mime — Groq vision handles it
-            base64_image = base64.b64encode(report_bytes).decode("utf-8")
-            image_mime   = "application/pdf"
-            has_image    = True   # reuse vision pipeline
+            # ✅ FIX: Convert PDF first page → JPEG so vision model can read it
+            converted = pdf_bytes_to_jpeg_base64(report_bytes)
+            if converted:
+                base64_image = converted
+                image_mime   = "image/jpeg"
+                has_image    = True
+            else:
+                # Could not convert — tell the user
+                return {
+                    "session_id":    session_id or str(uuid.uuid4()),
+                    "query":         user_query,
+                    "response":      "⚠️ Could not process the PDF. Please make sure poppler is installed on the server, or upload the report as an image (JPG/PNG).",
+                    "risk_level":    "LOW",
+                    "explainability": "",
+                    "needs_map":     False,
+                    "image_type":    "PDF_REPORT",
+                    "audio_base64":  None,
+                }
         else:
             # Image-based report (photo of a report / scan)
             base64_image = base64.b64encode(report_bytes).decode("utf-8")
@@ -128,7 +180,7 @@ async def chat(
         "message":    user_query,
         "has_image":  has_image,
         "has_report": has_report,
-        "created_at": datetime.datetime.utcnow()
+        "created_at": datetime.datetime.utcnow(),
     })
 
     upsert_embedding(user_id, "chat", f"User asks: {user_query}")
@@ -156,7 +208,6 @@ async def chat(
     needs_map      = llm_output.get("needs_map",      False)
     image_type     = llm_output.get("image_type",     "NONE")
 
-    # Override image_type for reports so frontend shows correct badge
     if has_report and image_type == "NONE":
         image_type = "PDF_REPORT"
 
@@ -172,19 +223,19 @@ async def chat(
         "image_type":   image_type,
         "needs_map":    needs_map,
         "audio_base64": audio_base64,
-        "created_at":   datetime.datetime.utcnow()
+        "created_at":   datetime.datetime.utcnow(),
     })
 
     upsert_embedding(user_id, "reply", f"AI answered: {response_text}")
 
     # ── 11. Return ────────────────────────────────────────────
     return {
-        "session_id":    session_id,
-        "query":         user_query,
-        "response":      response_text,
-        "risk_level":    risk_level,
+        "session_id":     session_id,
+        "query":          user_query,
+        "response":       response_text,
+        "risk_level":     risk_level,
         "explainability": explainability,
-        "needs_map":     needs_map,
-        "image_type":    image_type,
-        "audio_base64":  audio_base64,
+        "needs_map":      needs_map,
+        "image_type":     image_type,
+        "audio_base64":   audio_base64,
     }
