@@ -26,7 +26,8 @@ export default function Login() {
       navigate("/chat");
     } catch (err) {
       console.error(err);
-      toast("Invalid email or password", "error");
+      const detail = err?.response?.data?.detail || "Invalid email or password.";
+      toast(detail, "error");
     } finally {
       setLoading(false);
     }
@@ -40,23 +41,22 @@ export default function Login() {
     }}>
       {/* Ambient glows */}
       <div style={{
-        position: "absolute", width: "600px", height: "600px",
-        borderRadius: "50%", background: "radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 70%)",
+        position: "absolute", width: "600px", height: "600px", borderRadius: "50%",
+        background: "radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 70%)",
         top: "-200px", left: "-100px", pointerEvents: "none",
       }} />
       <div style={{
-        position: "absolute", width: "500px", height: "500px",
-        borderRadius: "50%", background: "radial-gradient(circle, rgba(139,92,246,0.1) 0%, transparent 70%)",
+        position: "absolute", width: "500px", height: "500px", borderRadius: "50%",
+        background: "radial-gradient(circle, rgba(139,92,246,0.1) 0%, transparent 70%)",
         bottom: "-150px", right: "20%", pointerEvents: "none",
       }} />
 
       {/* Left decorative panel */}
-      <div style={{
+      <div className="login-left-panel" style={{
         flex: 1, display: "none", flexDirection: "column", justifyContent: "center",
         alignItems: "center", padding: "3rem",
         borderRight: "1px solid rgba(99,102,241,0.15)",
-        '@media(minWidth:900px)': { display: "flex" },
-      }} className="login-left-panel">
+      }}>
         <LeftPanel />
       </div>
 
@@ -64,7 +64,7 @@ export default function Login() {
       <div style={{
         width: "100%", maxWidth: "480px", margin: "0 auto",
         display: "flex", flexDirection: "column", justifyContent: "center",
-        padding: "2rem 2rem",
+        padding: "2rem",
       }}>
         {/* Logo */}
         <div style={{ marginBottom: "2.5rem" }}>
@@ -79,7 +79,7 @@ export default function Login() {
               </svg>
             </div>
             <span style={{ fontSize: "1.1rem", fontWeight: 600, color: "#e2e8f0", letterSpacing: "-0.01em" }}>
-              Chatbot AI
+              Health AI
             </span>
           </div>
           <h1 style={{ fontSize: "1.75rem", fontWeight: 700, color: "#f1f5f9", margin: "0 0 0.5rem", letterSpacing: "-0.03em" }}>
@@ -94,8 +94,7 @@ export default function Login() {
         <div style={{
           background: "rgba(15,20,40,0.8)",
           border: "1px solid rgba(99,102,241,0.2)",
-          borderRadius: "16px",
-          padding: "2rem",
+          borderRadius: "16px", padding: "2rem",
           backdropFilter: "blur(20px)",
           boxShadow: "0 0 0 1px rgba(255,255,255,0.03), 0 20px 60px rgba(0,0,0,0.4)",
         }}>
@@ -126,10 +125,11 @@ export default function Login() {
               }
             />
 
+            {/* ✅ Now links to the real Forgot Password page */}
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <a href="#" style={{ fontSize: "0.8125rem", color: "#818cf8", textDecoration: "none" }}>
+              <Link to="/forgot-password" style={{ fontSize: "0.8125rem", color: "#818cf8", textDecoration: "none" }}>
                 Forgot password?
-              </a>
+              </Link>
             </div>
 
             <button
@@ -137,17 +137,13 @@ export default function Login() {
               disabled={loading}
               style={{
                 padding: "0.75rem",
-                background: loading
-                  ? "rgba(99,102,241,0.5)"
-                  : "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                background: loading ? "rgba(99,102,241,0.5)" : "linear-gradient(135deg, #6366f1, #8b5cf6)",
                 border: "none", borderRadius: "10px", color: "white",
                 fontSize: "0.9375rem", fontWeight: 600, cursor: loading ? "not-allowed" : "pointer",
                 transition: "all 0.2s ease",
                 display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem",
                 boxShadow: loading ? "none" : "0 4px 20px rgba(99,102,241,0.4)",
               }}
-              onMouseEnter={(e) => { if (!loading) e.target.style.transform = "translateY(-1px)"; }}
-              onMouseLeave={(e) => { e.target.style.transform = "translateY(0)"; }}
             >
               {loading ? <Spinner /> : null}
               {loading ? "Signing in…" : "Sign in"}
@@ -185,11 +181,8 @@ function LeftPanel() {
         width: "80px", height: "80px", borderRadius: "20px", margin: "0 auto 2rem",
         background: "linear-gradient(135deg, rgba(99,102,241,0.3), rgba(139,92,246,0.3))",
         border: "1px solid rgba(99,102,241,0.3)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: "2rem",
-      }}>
-        🤖
-      </div>
+        display: "flex", alignItems: "center", justifyContent: "center", fontSize: "2rem",
+      }}>🤖</div>
       <h2 style={{ color: "#f1f5f9", fontSize: "1.5rem", fontWeight: 700, marginBottom: "0.75rem", letterSpacing: "-0.02em" }}>
         Your AI companion
       </h2>
@@ -202,8 +195,7 @@ function LeftPanel() {
             display: "flex", alignItems: "center", gap: "0.75rem",
             padding: "0.75rem 1rem",
             background: "rgba(99,102,241,0.06)",
-            border: "1px solid rgba(99,102,241,0.12)",
-            borderRadius: "10px",
+            border: "1px solid rgba(99,102,241,0.12)", borderRadius: "10px",
           }}>
             <span style={{ fontSize: "1.1rem" }}>{f.icon}</span>
             <span style={{ color: "#94a3b8", fontSize: "0.9rem" }}>{f.text}</span>
@@ -225,23 +217,17 @@ function InputField({ label, type, value, onChange, placeholder, icon, rightSlot
         display: "flex", alignItems: "center",
         background: "rgba(15,20,40,0.9)",
         border: `1px solid ${focused ? "rgba(99,102,241,0.6)" : "rgba(99,102,241,0.15)"}`,
-        borderRadius: "10px",
-        transition: "border-color 0.2s ease",
+        borderRadius: "10px", transition: "border-color 0.2s ease",
         boxShadow: focused ? "0 0 0 3px rgba(99,102,241,0.15)" : "none",
       }}>
         <span style={{ paddingLeft: "0.875rem", color: "#475569", flexShrink: 0 }}>{icon}</span>
         <input
-          type={type}
-          value={value}
-          onChange={onChange}
-          placeholder={placeholder}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
+          type={type} value={value} onChange={onChange} placeholder={placeholder}
+          onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
           required
           style={{
             flex: 1, background: "transparent", border: "none", outline: "none",
-            padding: "0.75rem 0.75rem",
-            color: "#e2e8f0", fontSize: "0.9375rem",
+            padding: "0.75rem 0.75rem", color: "#e2e8f0", fontSize: "0.9375rem",
           }}
         />
         {rightSlot}
@@ -255,8 +241,7 @@ function Spinner() {
     <div style={{
       width: "16px", height: "16px",
       border: "2px solid rgba(255,255,255,0.3)",
-      borderTop: "2px solid white",
-      borderRadius: "50%",
+      borderTop: "2px solid white", borderRadius: "50%",
       animation: "spin 0.7s linear infinite",
     }}>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
@@ -281,6 +266,8 @@ const EyeIcon = () => (
 );
 const EyeOffIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" /><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" /><line x1="1" y1="1" x2="23" y2="23" />
+    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+    <line x1="1" y1="1" x2="23" y2="23" />
   </svg>
 );

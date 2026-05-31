@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { useToast } from '../components/Toast';
 
 export default function Profile() {
   const navigate = useNavigate();
-  const[loading, setLoading] = useState(false);
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     age: '',
@@ -22,31 +24,24 @@ export default function Profile() {
     exercise_level: 'None',
     previous_surgeries: '',
     family_history: '',
-    emergency_contact: ''
+    emergency_contact: '',
   });
 
-  // Fetch existing profile data on component mount
   useEffect(() => {
-    const fetchProfile = async () => {
-      try {
-        const { data } = await api.get('/profile/');
-        // If profile exists in DB, populate the form
+    api.get('/profile/')
+      .then(({ data }) => {
         if (data && Object.keys(data).length > 0) {
           setFormData(prev => ({ ...prev, ...data }));
         }
-      } catch (error) {
-        console.error("Error fetching profile:", error);
-      }
-    };
-    fetchProfile();
-  },[]);
+      })
+      .catch(() => toast('Could not load profile data.', 'error'));
+  }, []);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    // Ensure age is stored as a number
-    setFormData(prev => ({ 
-      ...prev, 
-      [name]: name === 'age' ? Number(value) : value 
+    setFormData(prev => ({
+      ...prev,
+      [name]: name === 'age' ? Number(value) : value,
     }));
   };
 
@@ -55,11 +50,10 @@ export default function Profile() {
     setLoading(true);
     try {
       await api.post('/profile/', formData);
-      alert('Profile updated successfully!');
-      navigate('/chat'); // Redirect back to chat after saving
-    } catch (error) {
-      console.error(error);
-      alert('Failed to update profile');
+      toast('Profile updated successfully!', 'success');
+      navigate('/chat');
+    } catch {
+      toast('Failed to update profile. Please try again.', 'error');
     } finally {
       setLoading(false);
     }
@@ -71,10 +65,10 @@ export default function Profile() {
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-3xl mx-auto bg-white rounded-xl shadow-md overflow-hidden">
-        
+
         <div className="bg-blue-600 px-6 py-4 flex justify-between items-center">
           <h2 className="text-2xl font-bold text-white">Medical Profile</h2>
-          <button 
+          <button
             onClick={() => navigate('/chat')}
             className="text-white hover:text-gray-200 text-sm font-medium underline"
           >
@@ -83,8 +77,8 @@ export default function Profile() {
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-8">
-          
-          {/* Section 1: Basic Info */}
+
+          {/* Basic Info */}
           <div>
             <h3 className="text-lg font-semibold border-b pb-2 mb-4 text-gray-800">Basic Information</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -124,7 +118,7 @@ export default function Profile() {
             </div>
           </div>
 
-          {/* Section 2: Medical History */}
+          {/* Medical History */}
           <div>
             <h3 className="text-lg font-semibold border-b pb-2 mb-4 text-gray-800">Medical History</h3>
             <div className="grid grid-cols-1 gap-4">
@@ -146,12 +140,12 @@ export default function Profile() {
               </div>
               <div>
                 <label className={labelClass}>Family Medical History</label>
-                <textarea name="family_history" value={formData.family_history} onChange={handleChange} className={inputClass} rows="2"></textarea>
+                <textarea name="family_history" value={formData.family_history} onChange={handleChange} className={inputClass} rows="2" />
               </div>
             </div>
           </div>
 
-          {/* Section 3: Lifestyle */}
+          {/* Lifestyle */}
           <div>
             <h3 className="text-lg font-semibold border-b pb-2 mb-4 text-gray-800">Lifestyle</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -175,7 +169,7 @@ export default function Profile() {
                 <label className={labelClass}>Sleep Pattern</label>
                 <select name="sleep_pattern" value={formData.sleep_pattern} onChange={handleChange} className={inputClass}>
                   <option value="Poor">Poor (Under 5 hrs)</option>
-                  <option value="Average">Average (5-7 hrs)</option>
+                  <option value="Average">Average (5–7 hrs)</option>
                   <option value="Good">Good (7+ hrs)</option>
                 </select>
               </div>
@@ -191,17 +185,15 @@ export default function Profile() {
             </div>
           </div>
 
-          {/* Submit Button */}
           <div className="pt-4">
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               disabled={loading}
               className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded hover:bg-blue-700 transition duration-300 disabled:bg-blue-400"
             >
-              {loading ? 'Saving Profile...' : 'Save Profile & Continue'}
+              {loading ? 'Saving Profile…' : 'Save Profile & Continue'}
             </button>
           </div>
-
         </form>
       </div>
     </div>

@@ -4,9 +4,9 @@ import api from "../services/api";
 import { useToast } from "../components/Toast";
 
 export default function Register() {
-  const [form, setForm] = useState({ username: "", email: "", password: "", confirm: "" });
+  const [form, setForm]       = useState({ name: "", email: "", password: "", confirm: "" });
   const [showPass, setShowPass] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading]  = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -18,18 +18,29 @@ export default function Register() {
       toast("Passwords do not match", "error");
       return;
     }
+    if (form.password.length < 6) {
+      toast("Password must be at least 6 characters", "error");
+      return;
+    }
     setLoading(true);
     try {
+      // Backend UserAuth expects: { name, email, password } as JSON body
       await api.post("/auth/register", {
-        username: form.username,
-        email: form.email,
+        name:     form.name.trim(),
+        email:    form.email.trim(),
         password: form.password,
       });
-      toast("Account created! Please log in.", "success");
+      toast("Account created! Please sign in.", "success");
       navigate("/login");
     } catch (err) {
       console.error(err);
-      const msg = err?.response?.data?.detail || "Registration failed. Please try again.";
+      const detail = err?.response?.data?.detail;
+      // detail can be a string or a Pydantic validation array
+      const msg = typeof detail === "string"
+        ? detail
+        : Array.isArray(detail)
+        ? detail.map(d => d.msg).join(", ")
+        : "Registration failed. Please try again.";
       toast(msg, "error");
     } finally {
       setLoading(false);
@@ -69,16 +80,14 @@ export default function Register() {
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
           </div>
-          <span style={{ fontSize: "1.1rem", fontWeight: 600, color: "#e2e8f0", letterSpacing: "-0.01em" }}>
-            Chatbot AI
-          </span>
+          <span style={{ fontSize: "1.1rem", fontWeight: 600, color: "#e2e8f0" }}>Health AI</span>
         </div>
 
         <h1 style={{ fontSize: "1.75rem", fontWeight: 700, color: "#f1f5f9", margin: "0 0 0.375rem", letterSpacing: "-0.03em" }}>
           Create your account
         </h1>
         <p style={{ color: "#64748b", fontSize: "0.9375rem", marginBottom: "1.75rem" }}>
-          Start chatting with AI in under a minute
+          Start your personalised health journey
         </p>
 
         <div style={{
@@ -88,32 +97,52 @@ export default function Register() {
           boxShadow: "0 0 0 1px rgba(255,255,255,0.03), 0 20px 60px rgba(0,0,0,0.4)",
         }}>
           <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "1.1rem" }}>
-            <InputField label="Username" type="text" value={form.username} onChange={set("username")}
-              placeholder="johndoe" icon={<UserIcon />} />
-            <InputField label="Email address" type="email" value={form.email} onChange={set("email")}
-              placeholder="you@example.com" icon={<EmailIcon />} />
+
+            {/* name — must match backend 'name' field */}
+            <InputField
+              label="Full name"
+              type="text"
+              value={form.name}
+              onChange={set("name")}
+              placeholder="John Doe"
+              icon={<UserIcon />}
+            />
+
+            <InputField
+              label="Email address"
+              type="email"
+              value={form.email}
+              onChange={set("email")}
+              placeholder="you@example.com"
+              icon={<EmailIcon />}
+            />
 
             <div>
-              <InputField label="Password" type={showPass ? "text" : "password"} value={form.password}
-                onChange={set("password")} placeholder="Min. 8 characters" icon={<LockIcon />}
+              <InputField
+                label="Password"
+                type={showPass ? "text" : "password"}
+                value={form.password}
+                onChange={set("password")}
+                placeholder="Min. 6 characters"
+                icon={<LockIcon />}
                 rightSlot={
                   <button type="button" onClick={() => setShowPass(!showPass)} style={{
-                    background: "none", border: "none", cursor: "pointer", color: "#475569",
-                    padding: "0 0.25rem", display: "flex", alignItems: "center",
+                    background: "none", border: "none", cursor: "pointer",
+                    color: "#475569", padding: "0 0.5rem",
+                    display: "flex", alignItems: "center",
                   }}>
                     {showPass ? <EyeOffIcon /> : <EyeIcon />}
                   </button>
                 }
               />
+              {/* Password strength meter */}
               {form.password && (
                 <div style={{ marginTop: "0.5rem" }}>
                   <div style={{ display: "flex", gap: "4px", marginBottom: "4px" }}>
                     {[1, 2, 3, 4].map((n) => (
                       <div key={n} style={{
                         flex: 1, height: "3px", borderRadius: "2px",
-                        background: n <= strength.level
-                          ? strength.color
-                          : "rgba(255,255,255,0.08)",
+                        background: n <= strength.level ? strength.color : "rgba(255,255,255,0.08)",
                         transition: "background 0.3s ease",
                       }} />
                     ))}
@@ -123,8 +152,14 @@ export default function Register() {
               )}
             </div>
 
-            <InputField label="Confirm password" type="password" value={form.confirm}
-              onChange={set("confirm")} placeholder="Re-enter password" icon={<LockIcon />} />
+            <InputField
+              label="Confirm password"
+              type="password"
+              value={form.confirm}
+              onChange={set("confirm")}
+              placeholder="Re-enter password"
+              icon={<LockIcon />}
+            />
 
             <button
               type="submit"
@@ -139,10 +174,10 @@ export default function Register() {
                 transition: "all 0.2s ease",
                 boxShadow: loading ? "none" : "0 4px 20px rgba(99,102,241,0.4)",
               }}
-              onMouseEnter={(e) => { if (!loading) e.target.style.transform = "translateY(-1px)"; }}
-              onMouseLeave={(e) => { e.target.style.transform = "translateY(0)"; }}
+              onMouseEnter={(e) => { if (!loading) e.currentTarget.style.transform = "translateY(-1px)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}
             >
-              {loading ? <Spinner /> : null}
+              {loading && <Spinner />}
               {loading ? "Creating account…" : "Create account"}
             </button>
           </form>
@@ -159,17 +194,19 @@ export default function Register() {
   );
 }
 
+// ── Helpers ────────────────────────────────────────────────────
+
 function passwordStrength(password) {
   if (!password) return { level: 0, label: "", color: "#475569" };
   let score = 0;
-  if (password.length >= 8) score++;
-  if (/[A-Z]/.test(password)) score++;
-  if (/[0-9]/.test(password)) score++;
+  if (password.length >= 6)          score++;
+  if (/[A-Z]/.test(password))        score++;
+  if (/[0-9]/.test(password))        score++;
   if (/[^A-Za-z0-9]/.test(password)) score++;
   const levels = [
-    { level: 1, label: "Weak", color: "#f87171" },
-    { level: 2, label: "Fair", color: "#fb923c" },
-    { level: 3, label: "Good", color: "#facc15" },
+    { level: 1, label: "Weak",   color: "#f87171" },
+    { level: 2, label: "Fair",   color: "#fb923c" },
+    { level: 3, label: "Good",   color: "#facc15" },
     { level: 4, label: "Strong", color: "#34d399" },
   ];
   return levels[score - 1] || levels[0];
@@ -179,20 +216,26 @@ function InputField({ label, type, value, onChange, placeholder, icon, rightSlot
   const [focused, setFocused] = useState(false);
   return (
     <div>
-      <label style={{ display: "block", fontSize: "0.8125rem", fontWeight: 500, color: "#94a3b8", marginBottom: "0.4rem" }}>
+      <label style={{
+        display: "block", fontSize: "0.8125rem", fontWeight: 500,
+        color: "#94a3b8", marginBottom: "0.4rem",
+      }}>
         {label}
       </label>
       <div style={{
         display: "flex", alignItems: "center",
         background: "rgba(15,20,40,0.9)",
         border: `1px solid ${focused ? "rgba(99,102,241,0.6)" : "rgba(99,102,241,0.15)"}`,
-        borderRadius: "10px", transition: "border-color 0.2s ease",
+        borderRadius: "10px", transition: "border-color 0.2s, box-shadow 0.2s",
         boxShadow: focused ? "0 0 0 3px rgba(99,102,241,0.15)" : "none",
       }}>
         <span style={{ paddingLeft: "0.875rem", color: "#475569", flexShrink: 0 }}>{icon}</span>
         <input
-          type={type} value={value} onChange={onChange} placeholder={placeholder}
-          onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} required
+          type={type} value={value} onChange={onChange}
+          placeholder={placeholder}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          required
           style={{
             flex: 1, background: "transparent", border: "none", outline: "none",
             padding: "0.75rem 0.75rem", color: "#e2e8f0", fontSize: "0.9375rem",

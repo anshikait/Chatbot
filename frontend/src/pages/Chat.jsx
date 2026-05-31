@@ -1,15 +1,28 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { useToast } from '../components/Toast';
 import {
   Mic, Send, Paperclip, AlertTriangle, User,
   LogOut, Image as ImageIcon, Plus, MessageSquare,
-  FileText, X, StopCircle
+  FileText, X, Square, Pause, Play, RotateCcw,
 } from 'lucide-react';
 import MapWidget from '../components/MapWidget';
 
+// ─────────────────────────────────────────────────────────────
+// Rich message content types
+// ─────────────────────────────────────────────────────────────
+const MSG_TYPE = {
+  TEXT:  'text',
+  IMAGE: 'image',   // { url, name }
+  PDF:   'pdf',     // { name }
+  VOICE: 'voice',   // { blobUrl }
+};
+
 export default function Chat() {
   const navigate = useNavigate();
+  const { toast } = useToast();
+
   const [messages, setMessages]                 = useState([]);
   const [sessions, setSessions]                 = useState([]);
   const [currentSessionId, setCurrentSessionId] = useState(null);
@@ -17,22 +30,26 @@ export default function Chat() {
   const [language, setLanguage]                 = useState('English');
   const [loading, setLoading]                   = useState(false);
 
-  // ── Voice recording ────────────────────────────────────────
-  const [isRecording, setIsRecording]     = useState(false);
+  // ── Voice recording state ───────────────────────────────────
+  const [recState, setRecState]       = useState('idle'); // 'idle' | 'recording' | 'paused'
   const [recordingTime, setRecordingTime] = useState(0);
+  const [pendingAudioBlob, setPendingAudioBlob] = useState(null);
+  const [pendingAudioUrl,  setPendingAudioUrl]  = useState(null);
+
   const mediaRecorderRef  = useRef(null);
   const audioChunksRef    = useRef([]);
+  const streamRef         = useRef(null);
   const recordingTimerRef = useRef(null);
 
-  // ── Pending attachments (shown as previews before sending) ─
-  const [pendingImage,  setPendingImage]  = useState(null); // { file, previewUrl }
+  // ── Pending attachments ─────────────────────────────────────
+  const [pendingImage,  setPendingImage]  = useState(null); // { file, previewUrl, name }
   const [pendingReport, setPendingReport] = useState(null); // { file, name }
 
-  const chatEndRef    = useRef(null);
+  const chatEndRef     = useRef(null);
   const imageInputRef  = useRef(null);
   const reportInputRef = useRef(null);
 
-  // ── Load sessions on mount ─────────────────────────────────
+  // ── Load sessions ───────────────────────────────────────────
   useEffect(() => { loadSessions(); }, []);
 
   const loadSessions = () => {
@@ -46,33 +63,36 @@ export default function Chat() {
       .catch(() => {});
   };
 
-  // ── Load history when session changes ─────────────────────
+  // ── Load history when session changes ──────────────────────
   useEffect(() => {
-    if (currentSessionId) {
-      api.get(`/chat/history?session_id=${currentSessionId}`)
-        .then(res => {
-          const formatted = res.data.reduce((acc, m) => {
-            if (m.message)  acc.push({ role: 'user', content: m.message });
-            if (m.response) acc.push({
+    if (!currentSessionId) { setMessages([]); return; }
+    api.get(`/chat/history?session_id=${currentSessionId}`)
+      .then(res => {
+        const formatted = res.data.reduce((acc, m) => {
+          if (m.message) {
+            acc.push({
+              role: 'user',
+              parts: [{ type: MSG_TYPE.TEXT, text: m.message }],
+            });
+          }
+          if (m.response) {
+            acc.push({
               role: 'bot',
-              content:       m.response,
+              parts: [{ type: MSG_TYPE.TEXT, text: m.response }],
               risk:          m.risk,
               explainability: m.explainability,
               needs_map:     m.needs_map,
               image_type:    m.image_type,
               audioBase64:   m.audio_base64,
             });
-            return acc;
-          }, []);
-          setMessages(formatted);
-        })
-        .catch(() => {});
-    } else {
-      setMessages([]);
-    }
+          }
+          return acc;
+        }, []);
+        setMessages(formatted);
+      })
+      .catch(() => {});
   }, [currentSessionId]);
 
-  // Auto-scroll
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
@@ -81,22 +101,40 @@ export default function Chat() {
   useEffect(() => {
     return () => {
       clearInterval(recordingTimerRef.current);
-      if (mediaRecorderRef.current && isRecording) mediaRecorderRef.current.stop();
+      stopStreamTracks();
     };
   }, []);
 
   // ════════════════════════════════════════════════════════════
-  // VOICE — start recording
+  // VOICE RECORDING — fully controlled
   // ════════════════════════════════════════════════════════════
+  const stopStreamTracks = () => {
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null;
+  };
+
+  const startTimer = () => {
+    clearInterval(recordingTimerRef.current);
+    recordingTimerRef.current = setInterval(() => {
+      setRecordingTime(prev => {
+        if (prev >= 59) { stopRecording(); return 0; }
+        return prev + 1;
+      });
+    }, 1000);
+  };
+
+  const pauseTimer = () => clearInterval(recordingTimerRef.current);
+
+  // Start fresh recording
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
 
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus'
         : MediaRecorder.isTypeSupported('audio/webm')
-        ? 'audio/webm'
-        : 'audio/ogg';
+        ? 'audio/webm' : 'audio/ogg';
 
       const recorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = recorder;
@@ -106,44 +144,75 @@ export default function Chat() {
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
 
-      recorder.onstop = () => {
-        stream.getTracks().forEach(t => t.stop()); // release mic
-        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-        clearInterval(recordingTimerRef.current);
-        setRecordingTime(0);
-        setIsRecording(false);
-        if (audioBlob.size > 0) sendMessage({ audioBlob });
-      };
-
       recorder.start(250);
-      setIsRecording(true);
+      setRecState('recording');
       setRecordingTime(0);
-
-      recordingTimerRef.current = setInterval(() => {
-        setRecordingTime(prev => {
-          if (prev >= 59) { stopRecording(); return 0; }
-          return prev + 1;
-        });
-      }, 1000);
-
-    } catch (err) {
-      console.error('Mic error:', err);
-      alert('Microphone access denied. Please allow microphone permissions in your browser settings and try again.');
+      startTimer();
+    } catch {
+      toast('Microphone access denied. Please allow mic permissions and try again.', 'error');
     }
   };
 
-  // ════════════════════════════════════════════════════════════
-  // VOICE — stop recording
-  // ════════════════════════════════════════════════════════════
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop(); // triggers onstop → sendMessage
+  // Pause recording (not stop — mic keeps running)
+  const pauseRecording = () => {
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.pause();
+      setRecState('paused');
+      pauseTimer();
     }
   };
 
-  const toggleRecording = () => {
-    if (isRecording) stopRecording();
-    else startRecording();
+  // Resume paused recording
+  const resumeRecording = () => {
+    if (mediaRecorderRef.current?.state === 'paused') {
+      mediaRecorderRef.current.resume();
+      setRecState('recording');
+      startTimer();
+    }
+  };
+
+  // Stop and KEEP the audio (will be shown as preview, not auto-sent)
+  const stopRecording = useCallback(() => {
+    if (!mediaRecorderRef.current) return;
+    pauseTimer();
+
+    mediaRecorderRef.current.onstop = () => {
+      stopStreamTracks();
+      const mimeType = mediaRecorderRef.current?.mimeType || 'audio/webm';
+      const blob = new Blob(audioChunksRef.current, { type: mimeType });
+      if (blob.size > 0) {
+        setPendingAudioBlob(blob);
+        setPendingAudioUrl(URL.createObjectURL(blob));
+      }
+      setRecState('idle');
+      setRecordingTime(0);
+    };
+
+    mediaRecorderRef.current.stop();
+  }, []);
+
+  // RESET — discard recording, restart clean
+  const resetRecording = () => {
+    // If currently recording/paused, stop and discard
+    if (mediaRecorderRef.current && ['recording', 'paused'].includes(mediaRecorderRef.current.state)) {
+      mediaRecorderRef.current.onstop = () => {
+        stopStreamTracks();
+        // Discard all chunks — do NOT set pendingAudio
+        audioChunksRef.current = [];
+        setRecState('idle');
+        setRecordingTime(0);
+        toast('Recording discarded.', 'info');
+      };
+      mediaRecorderRef.current.stop();
+    }
+    // Also clear any already-stopped pending audio
+    if (pendingAudioBlob) {
+      URL.revokeObjectURL(pendingAudioUrl);
+      setPendingAudioBlob(null);
+      setPendingAudioUrl(null);
+      toast('Voice note removed.', 'info');
+    }
+    pauseTimer();
   };
 
   // ════════════════════════════════════════════════════════════
@@ -152,7 +221,7 @@ export default function Chat() {
   const handleImageSelect = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setPendingImage({ file, previewUrl: URL.createObjectURL(file) });
+    setPendingImage({ file, previewUrl: URL.createObjectURL(file), name: file.name });
     e.target.value = '';
   };
 
@@ -161,44 +230,51 @@ export default function Chat() {
     if (!file) return;
     setPendingReport({ file, name: file.name });
     e.target.value = '';
+    // PDF notice
+    if (file.name.toLowerCase().endsWith('.pdf')) {
+      toast('PDF selected — will be analyzed via page preview.', 'info');
+    }
   };
 
   // ════════════════════════════════════════════════════════════
   // MAIN SEND
   // ════════════════════════════════════════════════════════════
-  const sendMessage = async ({ text, audioBlob } = {}) => {
-    const finalText   = text ?? (input.trim() || null);
+  const sendMessage = async () => {
+    const finalText   = input.trim() || null;
     const finalImage  = pendingImage?.file  ?? null;
     const finalReport = pendingReport?.file ?? null;
-    const finalAudio  = audioBlob ?? null;
+    const finalAudio  = pendingAudioBlob    ?? null;
 
     if (!finalText && !finalAudio && !finalImage && !finalReport) return;
 
-    // Clear pending attachments and input immediately
+    // Build rich user message parts
+    const userParts = [];
+    if (finalText)   userParts.push({ type: MSG_TYPE.TEXT,  text: finalText });
+    if (finalAudio)  userParts.push({ type: MSG_TYPE.VOICE, blobUrl: pendingAudioUrl });
+    if (finalImage)  userParts.push({ type: MSG_TYPE.IMAGE, url: pendingImage.previewUrl, name: pendingImage.name });
+    if (finalReport) userParts.push({ type: MSG_TYPE.PDF,   name: pendingReport.name });
+
+    // Clear inputs immediately
+    setInput('');
     setPendingImage(null);
     setPendingReport(null);
-    setInput('');
-    setLoading(true);
+    setPendingAudioBlob(null);
+    setPendingAudioUrl(null);
 
-    // Build display message
-    const parts = [];
-    if (finalText)   parts.push(finalText);
-    if (finalAudio)  parts.push('🎙️ Voice message');
-    if (finalImage)  parts.push(`📷 ${finalImage.name}`);
-    if (finalReport) parts.push(`📄 ${finalReport.name}`);
-    setMessages(prev => [...prev, { role: 'user', content: parts.join(' · ') }]);
+    setMessages(prev => [...prev, { role: 'user', parts: userParts }]);
+    setLoading(true);
 
     // Build FormData
     const formData = new FormData();
     formData.append('language', language);
-    if (finalText)         formData.append('message', finalText);
-    if (currentSessionId)  formData.append('session_id', currentSessionId);
+    if (finalText)        formData.append('message', finalText);
+    if (currentSessionId) formData.append('session_id', currentSessionId);
     if (finalAudio) {
       const ext = finalAudio.type.includes('ogg') ? 'ogg' : 'webm';
       formData.append('audio', finalAudio, `voice.${ext}`);
     }
     if (finalImage)  formData.append('image',  finalImage);
-    if (finalReport) formData.append('report', finalReport); // separate field
+    if (finalReport) formData.append('report', finalReport);
 
     try {
       const { data } = await api.post('/chat/', formData);
@@ -209,8 +285,8 @@ export default function Chat() {
       }
 
       setMessages(prev => [...prev, {
-        role:           'bot',
-        content:        data.response,
+        role: 'bot',
+        parts: [{ type: MSG_TYPE.TEXT, text: data.response }],
         risk:           data.risk_level,
         explainability: data.explainability,
         needs_map:      data.needs_map,
@@ -222,11 +298,25 @@ export default function Chat() {
         const snd = new Audio(`data:audio/mp3;base64,${data.audio_base64}`);
         snd.play().catch(() => {});
       }
+
+      if (data.risk_level === 'HIGH') {
+        toast('⚠️ High risk detected — please consult a doctor immediately.', 'error');
+      } else if (data.risk_level === 'MEDIUM') {
+        toast('⚠️ Medium risk detected — monitor symptoms closely.', 'info');
+      }
     } catch (err) {
       console.error('Chat error:', err);
+      const errMsg = err?.response?.status === 401
+        ? 'Session expired. Please log in again.'
+        : '⚠️ Something went wrong. Please try again.';
+      toast(errMsg, 'error');
+      if (err?.response?.status === 401) {
+        localStorage.removeItem('token');
+        navigate('/login');
+      }
       setMessages(prev => [...prev, {
         role: 'bot',
-        content: '⚠️ Sorry, something went wrong. Please try again.',
+        parts: [{ type: MSG_TYPE.TEXT, text: '⚠️ Sorry, something went wrong. Please try again.' }],
         risk: 'LOW',
       }]);
     }
@@ -237,7 +327,7 @@ export default function Chat() {
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendMessage({ text: input.trim() });
+      sendMessage();
     }
   };
 
@@ -246,10 +336,16 @@ export default function Chat() {
     setMessages([]);
     setPendingImage(null);
     setPendingReport(null);
+    resetRecording();
   };
 
-  const handleLogout = () => {
+  // ── Proper logout: call backend then clear token ────────────
+  const handleLogout = async () => {
+    try {
+      await api.post('/auth/logout');
+    } catch {}
     localStorage.removeItem('token');
+    toast('Logged out successfully.', 'success');
     navigate('/');
   };
 
@@ -262,6 +358,8 @@ export default function Chat() {
     OTHER_MEDICAL: { label: '📋 Medical Document',  cls: 'bg-gray-50 text-gray-700 border-gray-200' },
     PDF_REPORT:    { label: '📄 Report Analysis',   cls: 'bg-orange-50 text-orange-700 border-orange-200' },
   };
+
+  const isActiveRecording = recState === 'recording' || recState === 'paused';
 
   return (
     <div className="flex h-screen bg-gray-100">
@@ -357,24 +455,29 @@ export default function Chat() {
 
           {messages.map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-2xl w-full p-5 rounded-2xl shadow-sm ${
+              <div className={`max-w-2xl w-full p-4 rounded-2xl shadow-sm ${
                 msg.role === 'user'
                   ? 'bg-blue-600 text-white rounded-tr-sm ml-8'
                   : 'bg-white text-gray-800 border rounded-tl-sm mr-8'
               }`}>
-                <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
 
+                {/* ── Rich content parts ── */}
+                <div className="space-y-2">
+                  {msg.parts.map((part, pi) => (
+                    <RichPart key={pi} part={part} isUser={msg.role === 'user'} />
+                  ))}
+                </div>
+
+                {/* ── Bot extras ── */}
                 {msg.role === 'bot' && (
                   <div className="mt-4 space-y-3 border-t border-gray-100 pt-3">
 
-                    {/* Image/report type badge */}
                     {msg.image_type && msg.image_type !== 'NONE' && imageTypeBadge[msg.image_type] && (
                       <span className={`inline-flex items-center gap-1 text-xs font-semibold px-3 py-1 rounded-full border ${imageTypeBadge[msg.image_type].cls}`}>
                         {imageTypeBadge[msg.image_type].label}
                       </span>
                     )}
 
-                    {/* Risk badge */}
                     {msg.risk && msg.risk !== 'LOW' && (
                       <div className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full w-fit ${
                         msg.risk === 'HIGH'
@@ -423,23 +526,48 @@ export default function Chat() {
         <footer className="p-4 bg-white border-t border-gray-200 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
           <div className="max-w-4xl mx-auto space-y-3">
 
-            {/* Attachment previews */}
-            {(pendingImage || pendingReport) && (
+            {/* ── Attachment + voice previews ── */}
+            {(pendingImage || pendingReport || pendingAudioUrl) && (
               <div className="flex flex-wrap gap-2 px-1">
+
+                {/* Image preview */}
                 {pendingImage && (
                   <div className="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2 text-sm text-purple-700">
-                    <img src={pendingImage.previewUrl} alt="preview" className="w-8 h-8 object-cover rounded" />
-                    <span className="max-w-[140px] truncate">{pendingImage.file.name}</span>
+                    <img src={pendingImage.previewUrl} alt="preview" className="w-10 h-10 object-cover rounded" />
+                    <span className="max-w-[140px] truncate">{pendingImage.name}</span>
                     <button onClick={() => setPendingImage(null)} className="ml-1 hover:text-purple-900">
                       <X size={14} />
                     </button>
                   </div>
                 )}
+
+                {/* PDF preview */}
                 {pendingReport && (
                   <div className="flex items-center gap-2 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2 text-sm text-orange-700">
-                    <FileText size={16} />
-                    <span className="max-w-[160px] truncate">{pendingReport.name}</span>
+                    <div className="w-10 h-10 bg-orange-100 rounded flex items-center justify-center flex-shrink-0">
+                      <FileText size={18} className="text-orange-600" />
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="max-w-[160px] truncate font-medium">{pendingReport.name}</span>
+                      <span className="text-xs text-orange-500">PDF Report</span>
+                    </div>
                     <button onClick={() => setPendingReport(null)} className="ml-1 hover:text-orange-900">
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
+
+                {/* Voice note preview */}
+                {pendingAudioUrl && (
+                  <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
+                    <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
+                      <Mic size={14} className="text-red-600" />
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <audio controls src={pendingAudioUrl} className="h-8 max-w-[180px]" />
+                      <span className="text-xs text-red-500 mt-0.5">Voice note ready</span>
+                    </div>
+                    <button onClick={resetRecording} className="ml-1 hover:text-red-900" title="Remove voice note">
                       <X size={14} />
                     </button>
                   </div>
@@ -447,7 +575,7 @@ export default function Chat() {
               </div>
             )}
 
-            {/* Toolbar */}
+            {/* ── Toolbar ── */}
             <div className="flex flex-wrap gap-3 items-center text-gray-500 text-sm px-1">
               <select
                 value={language}
@@ -470,40 +598,81 @@ export default function Chat() {
               </label>
             </div>
 
-            {/* Recording indicator */}
-            {isRecording && (
-              <div className="flex items-center gap-3 px-4 py-2 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm font-medium">
-                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
-                Recording… {recordingTime}s
-                <span className="text-xs text-red-400 ml-auto">Tap mic again to stop · max 60s</span>
+            {/* ── Recording controls (shown when active) ── */}
+            {isActiveRecording && (
+              <div className="flex items-center gap-3 px-4 py-2.5 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm font-medium">
+                <span className={`w-2.5 h-2.5 rounded-full bg-red-500 ${recState === 'recording' ? 'animate-pulse' : 'opacity-50'}`} />
+                <span>
+                  {recState === 'paused' ? 'Paused' : 'Recording…'} {recordingTime}s
+                </span>
+                <span className="text-xs text-red-400 ml-auto">max 60s</span>
+
+                {/* Pause / Resume */}
+                <button
+                  onClick={recState === 'recording' ? pauseRecording : resumeRecording}
+                  title={recState === 'recording' ? 'Pause' : 'Resume'}
+                  className="p-1.5 rounded-lg bg-red-100 hover:bg-red-200 transition"
+                >
+                  {recState === 'recording'
+                    ? <Pause size={16} />
+                    : <Play size={16} />
+                  }
+                </button>
+
+                {/* Stop and keep */}
+                <button
+                  onClick={stopRecording}
+                  title="Stop & keep recording"
+                  className="p-1.5 rounded-lg bg-red-100 hover:bg-red-200 transition"
+                >
+                  <Square size={16} />
+                </button>
+
+                {/* Reset / discard */}
+                <button
+                  onClick={resetRecording}
+                  title="Discard this recording"
+                  className="p-1.5 rounded-lg bg-red-100 hover:bg-red-200 transition text-red-600"
+                >
+                  <RotateCcw size={16} />
+                </button>
               </div>
             )}
 
-            {/* Input row */}
+            {/* ── Input row ── */}
             <div className="flex gap-2 bg-gray-100 p-1.5 rounded-2xl border border-gray-200 focus-within:ring-2 focus-within:ring-blue-400 transition-all shadow-inner">
               <input
                 type="text"
                 className="flex-1 px-4 py-3 bg-transparent text-gray-800 outline-none placeholder-gray-400"
-                placeholder={isRecording ? 'Recording… tap mic to stop' : `Type your medical issue in ${language}…`}
+                placeholder={
+                  isActiveRecording
+                    ? recState === 'paused' ? 'Recording paused…' : 'Recording… pause or stop when done'
+                    : `Type your medical issue in ${language}…`
+                }
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                disabled={isRecording}
+                disabled={isActiveRecording}
               />
+
+              {/* Mic button — starts recording, not a toggle-send */}
               <button
-                onClick={toggleRecording}
-                title={isRecording ? 'Stop recording' : 'Start voice input'}
+                onClick={isActiveRecording ? stopRecording : startRecording}
+                title={isActiveRecording ? 'Stop recording' : 'Start voice input'}
                 className={`p-3 rounded-xl transition shadow-sm ${
-                  isRecording
+                  recState === 'recording'
                     ? 'bg-red-500 text-white'
+                    : recState === 'paused'
+                    ? 'bg-yellow-400 text-white'
                     : 'bg-white text-gray-600 hover:text-blue-600 border'
                 }`}
               >
-                {isRecording ? <StopCircle size={22} /> : <Mic size={22} />}
+                <Mic size={22} />
               </button>
+
               <button
-                onClick={() => sendMessage({ text: input.trim() })}
-                disabled={loading || isRecording}
+                onClick={sendMessage}
+                disabled={loading || isActiveRecording}
                 className="p-3 rounded-xl bg-blue-600 text-white hover:bg-blue-700 shadow-md transition disabled:opacity-50"
               >
                 <Send size={22} />
@@ -514,4 +683,68 @@ export default function Chat() {
       </div>
     </div>
   );
+}
+
+
+// ─────────────────────────────────────────────────────────────
+// RichPart — renders each content type in a chat bubble
+// ─────────────────────────────────────────────────────────────
+function RichPart({ part, isUser }) {
+  switch (part.type) {
+    case MSG_TYPE.TEXT:
+      return (
+        <p className="whitespace-pre-wrap leading-relaxed">{part.text}</p>
+      );
+
+    case MSG_TYPE.IMAGE:
+      return (
+        <div className="space-y-1">
+          <img
+            src={part.url}
+            alt={part.name}
+            className="max-w-xs max-h-56 rounded-xl object-cover border border-white/20 shadow"
+          />
+          <p className={`text-xs ${isUser ? 'text-blue-200' : 'text-gray-400'}`}>
+            📷 {part.name}
+          </p>
+        </div>
+      );
+
+    case MSG_TYPE.PDF:
+      return (
+        <div className={`flex items-center gap-2 px-3 py-2 rounded-xl w-fit ${
+          isUser ? 'bg-blue-500/40 text-blue-100' : 'bg-orange-50 text-orange-700 border border-orange-100'
+        }`}>
+          <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
+            isUser ? 'bg-blue-400/40' : 'bg-orange-100'
+          }`}>
+            <FileText size={16} />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-sm font-medium max-w-[200px] truncate">{part.name}</span>
+            <span className={`text-xs ${isUser ? 'text-blue-300' : 'text-orange-400'}`}>PDF Report</span>
+          </div>
+        </div>
+      );
+
+    case MSG_TYPE.VOICE:
+      return (
+        <div className={`flex items-center gap-2 px-3 py-2 rounded-xl w-fit ${
+          isUser ? 'bg-blue-500/40 text-blue-100' : 'bg-gray-100 text-gray-600'
+        }`}>
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+            isUser ? 'bg-blue-400/40' : 'bg-gray-200'
+          }`}>
+            <Mic size={14} />
+          </div>
+          <div className="flex flex-col gap-1">
+            <audio controls src={part.blobUrl} className="h-8 max-w-[200px]" />
+            <span className={`text-xs ${isUser ? 'text-blue-300' : 'text-gray-400'}`}>Voice message</span>
+          </div>
+        </div>
+      );
+
+    default:
+      return null;
+  }
 }
