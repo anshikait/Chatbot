@@ -60,10 +60,10 @@ CORS_ORIGINS = os.getenv(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,  # Which domains allowed
-    allow_credentials=True,       # Allow cookies/auth
-    allow_methods=["*"],          # GET, POST, etc.
-    allow_headers=["*"],          # Any headers
+    allow_origins=[origin.strip() for origin in CORS_ORIGINS],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # ============================================
@@ -76,7 +76,7 @@ app.add_middleware(
     allowed_hosts=[
         "localhost",
         "127.0.0.1",
-        "https://doctorease.onrender.com",
+        "doctorease.onrender.com",
     ]
 )
 
