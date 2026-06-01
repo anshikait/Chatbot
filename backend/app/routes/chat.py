@@ -193,6 +193,8 @@ async def chat(
     base64_image = None
     image_mime   = "image/jpeg"
     user_location = {}  # Will be populated from profile
+    report_name  = None         # 🆕 ADDED BACK
+    user_audio_base64 = None    # 🆕 ADDED BACK
 
     # ── Retrieve user location from profile ──────────────────
     try:
@@ -209,7 +211,9 @@ async def chat(
     # ── 1. Audio transcription ───────────────────────────────
     if audio:
         audio_bytes = await audio.read()
-        user_query  = transcribe_audio(audio_bytes, audio.filename)
+        transcribed_text = transcribe_audio(audio_bytes, audio.filename)
+        user_query = f"{transcribed_text}\n{user_query}".strip()
+        user_audio_base64 = base64.b64encode(audio_bytes).decode("utf-8") # 🆕 Added back
 
     # ── 2. Skin image / scan ─────────────────────────────────
     if image:
@@ -231,7 +235,7 @@ async def chat(
         report_bytes = await report.read()
         fname        = (report.filename or "").lower()
         has_report   = True
-
+        report_name  = report.filename
         if fname.endswith(".pdf"):
             # ✅ USE PyPDF + PyMuPDF for PDF extraction
             pdf_content = extract_pdf_content(report_bytes)
@@ -273,6 +277,8 @@ async def chat(
         "message":    user_query,
         "has_image":  has_image,
         "has_report": has_report,
+        "report_name":       report_name,        # 🆕 Saved for UI
+        "user_audio_base64": user_audio_base64,  # 🆕 Saved for playback
         "created_at": datetime.datetime.utcnow()
     })
 
@@ -321,6 +327,7 @@ async def chat(
         "risk":         risk_level,
         "image_type":   image_type,
         "needs_map":    needs_map,
+        "explainability": explainability, # 🆕 Saved for UI
         "audio_base64": audio_base64,
         "created_at":   datetime.datetime.utcnow()
     })
@@ -337,5 +344,8 @@ async def chat(
         "needs_map":      needs_map,
         "image_type":     image_type,
         "audio_base64":   audio_base64,
+        "user_audio_base64": user_audio_base64, # 🆕 Returned for UI
+        "has_image":         has_image,
+        "report_name":       report_name,       # 🆕 Returned for UI
         "user_location":  user_location,  # ✅ Pass location to frontend
     }
