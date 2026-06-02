@@ -1,6 +1,30 @@
-# DoctorEase - Personalized Multilingual Medical AI Chatbot
+# 🩺 Personalized Multilingual Medical AI Chatbot
+
+[![Live Demo](https://img.shields.io/badge/Demo-Live%20Website-06B6D4?style=for-the-badge&logo=vercel&logoColor=white)](https://doctorease-seven.vercel.app/)
 
 An advanced, multimodal, and multilingual AI healthcare assistant designed to provide advisory guidance and wellness support. Built with **React, FastAPI, Groq LLM, Pinecone, and MongoDB**, this system utilizes a **Layered Retrieval-Augmented Generation (RAG)** architecture to deliver evidence-based clinical context alongside traditional wellness insights, tailored to the user's documented medical history.
+
+---
+
+## 🛠️ Tech Stack
+
+### Frontend
+![React](https://img.shields.io/badge/React-1E1E2F?style=for-the-badge&logo=react&logoColor=61DAFB)
+![Vite](https://img.shields.io/badge/Vite-1E1E2F?style=for-the-badge&logo=vite&logoColor=646CFF)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-1E1E2F?style=for-the-badge&logo=tailwindcss&logoColor=06B6D4)
+![Leaflet](https://img.shields.io/badge/Leaflet-1E1E2F?style=for-the-badge&logo=leaflet&logoColor=B9E026)
+![React Router](https://img.shields.io/badge/React_Router-1E1E2F?style=for-the-badge&logo=reactrouter&logoColor=CA4245)
+
+### Backend & AI Infrastructure
+![FastAPI](https://img.shields.io/badge/FastAPI-1E1E2F?style=for-the-badge&logo=fastapi&logoColor=009688)
+![Python](https://img.shields.io/badge/Python-1E1E2F?style=for-the-badge&logo=python&logoColor=3776AB)
+![Groq LPU](https://img.shields.io/badge/Groq_LPU-1E1E2F?style=for-the-badge&logo=cpu&logoColor=F05023)
+![Meta Llama](https://img.shields.io/badge/Meta_Llama-1E1E2F?style=for-the-badge&logo=meta&logoColor=044F8C)
+![OpenAI Whisper](https://img.shields.io/badge/Whisper_AI-1E1E2F?style=for-the-badge&logo=openai&logoColor=412991)
+
+### Databases & Vector Search
+![Pinecone](https://img.shields.io/badge/Pinecone_DB-1E1E2F?style=for-the-badge&logo=database&logoColor=EC4899)
+![MongoDB](https://img.shields.io/badge/MongoDB-1E1E2F?style=for-the-badge&logo=mongodb&logoColor=47A248)
 
 ---
 
@@ -16,25 +40,6 @@ An advanced, multimodal, and multilingual AI healthcare assistant designed to pr
 
 ---
 
-## 🛠️ Tech Stack
-
-### Frontend
-- **Framework:** React.js (Vite)
-- **Styling:** Tailwind CSS
-- **Mapping:** React Leaflet & OpenStreetMap API
-- **HTTP Client:** Axios
-- **Routing:** React Router DOM
-
-### Backend
-- **Framework:** FastAPI & Uvicorn
-- **AI/LLM:** Groq API (`llama3-70b-8192` & `llama-3.2-11b-vision-preview`)
-- **Vector DB:** Pinecone (Semantic Memory & RAG)
-- **NoSQL DB:** MongoDB Atlas (Authentication, Profiles, Chat Logs)
-- **Embeddings:** SentenceTransformers (`all-MiniLM-L6-v2`)
-- **Audio Processing:** Whisper API (STT), gTTS (TTS)
-
----
-
 ## 🏗️ System Architecture
 
 ```text
@@ -47,7 +52,7 @@ React Frontend (Staging Area & Map Widget)
 FastAPI Backend (Authentication & Orchestration)
       │
       ├──► Whisper API (Audio to Text)
-      ├──► Tesseract OCR (Extract Report Text)
+      ├──► pypdf(Extract Report Text)
       ├──► Groq Vision (Image Analysis)
       │
       ▼
@@ -75,11 +80,10 @@ React Frontend (Renders Text, Plays Audio, Opens Map if needed)
 - **Python** (v3.9+)
 - **MongoDB** (Local instance or MongoDB Atlas URI)
 
-
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/anshikait/Chatbot.git
-cd Chatbot
+git clone https://github.com/anshikait/DoctorEase.git
+cd DoctorEase
 ```
 
 ### 2. Backend Setup
@@ -158,6 +162,8 @@ To populate the vector database with medical and wellness domain knowledge:
 
 - **Frontend (Vercel):** Connect your GitHub repository to Vercel. Set the **Framework Preset** to Vite and define `VITE_API_URL` in your Vercel Environment Variables.
 - **Backend (Render):** Deploy as a Python Web Service. Set the build command to `pip install -r requirements.txt` and the start command to `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+
+  > *Note: For production file uploads, integrate a cloud storage service (such as Cloudinary or AWS S3) to avoid data loss due to Render's ephemeral filesystem.*
 
 ---
 
