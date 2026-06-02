@@ -430,7 +430,7 @@ export default function Chat() {
       <div className="w-72 bg-gray-900 text-white flex-col hidden md:flex shadow-xl z-10">
         <div className="p-4 flex justify-between items-center">
           <h1 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-teal-400 bg-clip-text text-transparent">
-            Health AI
+            DoctorEase
           </h1>
           <button onClick={() => navigate('/profile')} className="p-2 hover:bg-gray-800 rounded-full transition">
             <User size={20} />
@@ -481,7 +481,7 @@ export default function Chat() {
 
         {/* Mobile header */}
         <header className="bg-white p-4 shadow-sm flex justify-between items-center md:hidden border-b z-10">
-          <h1 className="font-bold text-blue-600">Health AI</h1>
+          <h1 className="font-bold text-blue-600">DoctorEase</h1>
           <div className="flex gap-3">
             <button onClick={startNewChat} className="text-blue-600"><Plus size={24} /></button>
             <button onClick={() => navigate('/profile')}><User size={20} /></button>

@@ -79,7 +79,7 @@ export default function Login() {
               </svg>
             </div>
             <span style={{ fontSize: "1.1rem", fontWeight: 600, color: "#e2e8f0", letterSpacing: "-0.01em" }}>
-              Health AI
+              DoctorEase
             </span>
           </div>
           <h1 style={{ fontSize: "1.75rem", fontWeight: 700, color: "#f1f5f9", margin: "0 0 0.5rem", letterSpacing: "-0.03em" }}>

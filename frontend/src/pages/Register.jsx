@@ -80,7 +80,7 @@ export default function Register() {
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
           </div>
-          <span style={{ fontSize: "1.1rem", fontWeight: 600, color: "#e2e8f0" }}>Health AI</span>
+          <span style={{ fontSize: "1.1rem", fontWeight: 600, color: "#e2e8f0" }}>DoctorEase</span>
         </div>
 
         <h1 style={{ fontSize: "1.75rem", fontWeight: 700, color: "#f1f5f9", margin: "0 0 0.375rem", letterSpacing: "-0.03em" }}>
