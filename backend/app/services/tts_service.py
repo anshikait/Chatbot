@@ -1,7 +1,7 @@
 from gtts import gTTS
 """
 app/services/tts_service.py — Text-to-Speech with controls
-Improved: Markdown cleaning, proper audio handling
+Improved: Markdown cleaning, proper audio handling, unlimited length
 """
 
 import io
@@ -83,7 +83,7 @@ def text_to_speech_base64(text: str, language: str = "en") -> str:
     Convert text to speech and return as base64 audio.
     
     ✅ Cleans markdown before TTS
-    ✅ Handles long texts (gTTS limitation ~100 chars per request)
+    ✅ Handles full-length text (Truncation removed)
     ✅ Returns playable audio in browser
     
     Args:
@@ -98,11 +98,8 @@ def text_to_speech_base64(text: str, language: str = "en") -> str:
         # ✅ Clean markdown formatting
         clean_text = clean_markdown_for_tts(text)
         
-        # Limit text length (gTTS has issues with very long texts)
-        max_length = 1000
-        if len(clean_text) > max_length:
-            print(f"⚠️ Text too long ({len(clean_text)} chars), truncating to {max_length}")
-            clean_text = clean_text[:max_length] + "..."
+        # Log that we are processing the FULL length
+        print(f"🔊 Processing full TTS generation for {len(clean_text)} characters...")
         
         # Map language names to codes
         language_map = {
@@ -123,7 +120,7 @@ def text_to_speech_base64(text: str, language: str = "en") -> str:
         # Use language code if provided, otherwise try to map
         lang_code = language_map.get(language, language)
         
-        # Generate speech
+        # Generate speech (gTTS will automatically chunk large texts internally to avoid API limits)
         tts = gTTS(text=clean_text, lang=lang_code, slow=False)
         
         # Save to bytes
@@ -134,7 +131,7 @@ def text_to_speech_base64(text: str, language: str = "en") -> str:
         # Encode to base64
         audio_base64 = base64.b64encode(audio_fp.getvalue()).decode('utf-8')
         
-        print(f"✅ TTS generated: {len(clean_text)} chars → audio")
+        print(f"✅ TTS successfully generated for full text: {len(clean_text)} chars")
         
         return audio_base64
     

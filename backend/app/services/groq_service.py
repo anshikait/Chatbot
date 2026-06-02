@@ -1,3 +1,4 @@
+# app/services/groq_service.py
 import json
 import re
 from groq import Groq
@@ -9,7 +10,7 @@ client = Groq(api_key=settings.GROQ_API_KEY)
 # Model constants
 # ─────────────────────────────────────────────
 TEXT_MODEL   = "llama-3.3-70b-versatile"
-VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"  # Groq vision model that actually supports images
+VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"  # Using Groq's official vision model name
 
 
 # ─────────────────────────────────────────────
@@ -28,7 +29,6 @@ Look at the image and respond with ONLY one of these exact labels (no extra text
 
 # ─────────────────────────────────────────────
 # Specialised system prompts per image type
-# ✅ IMPROVED: Much more detailed analysis
 # ─────────────────────────────────────────────
 IMAGE_PROMPTS = {
     "SKIN_DISEASE": """
@@ -345,7 +345,6 @@ for proper analysis.
 def detect_image_type(base64_image: str) -> str:
     """
     Uses the vision model to classify what type of medical image was uploaded.
-    Returns one of: SKIN_DISEASE, LAB_REPORT, XRAY_SCAN, PRESCRIPTION, OTHER_MEDICAL, NON_MEDICAL
     """
     try:
         completion = client.chat.completions.create(
@@ -379,43 +378,45 @@ def generate_medical_response(
     user_query: str,
     base64_image: str = None,
     image_mime: str = "image/jpeg",
+    language: str = "English",  # 🆕 ADDED THIS PARAMETER to fix the TypeError
 ) -> dict:
     """
     Generates a structured medical response.
-    ✅ IMPROVED: Higher temperature for more detailed responses, explicit max_tokens
-    - If image is provided: detects image type → uses specialised vision prompt → VISION_MODEL
-    - If text only: uses existing RAG system prompt → TEXT_MODEL
+    Includes bulletproof JSON parsing, language enforcement, and ultimate text fallback.
     """
 
-    json_format_instruction = """
-You must output ONLY valid JSON with these exact keys:
-{
+    # 🆕 UPDATED: Added strict Language and Double Quotes enforcement
+    json_format_instruction = f"""
+CRITICAL INSTRUCTIONS:
+1. You MUST respond STRICTLY in this language: {language.upper()}
+2. You must output ONLY valid JSON.
+3. You MUST use DOUBLE QUOTES (") for keys and string values.
+
+Format exactly like this:
+{{
   "response": "Your detailed medical answer (SHOULD BE COMPREHENSIVE AND DETAILED, NOT SHORT)",
   "risk_level": "LOW, MEDIUM, or HIGH",
   "explainability": "Sources and reasoning behind your answer",
   "needs_map": true or false,
   "image_type": "SKIN_DISEASE | LAB_REPORT | XRAY_SCAN | PRESCRIPTION | OTHER_MEDICAL | NON_MEDICAL | NONE"
-}
+}}
 Set needs_map to true ONLY if user asks for nearby clinics/hospitals/doctors or it is a medical emergency.
 Set image_type to NONE if no image was provided.
 
 IMPORTANT: Your response field should be DETAILED, COMPREHENSIVE, and THOROUGH.
 Use multiple paragraphs, bullet points, and structured formatting.
-Do NOT provide short, generic responses.
+Do NOT provide short, generic responses. Do NOT add any conversational text outside the JSON block.
 """
 
     # ─────────────────────────────────────────
     # VISION FLOW — image was uploaded
     # ─────────────────────────────────────────
     if base64_image:
-        # Step 1: Detect what kind of image this is
         image_type = detect_image_type(base64_image)
         print(f"[Image Classification] Detected type: {image_type}")
 
-        # Step 2: Pick the specialised image analysis prompt
         image_system_prompt = IMAGE_PROMPTS.get(image_type, IMAGE_PROMPTS["OTHER_MEDICAL"])
 
-        # Step 3: Combine with user profile/RAG context + JSON format
         combined_prompt = f"""
 {image_system_prompt}
 
@@ -429,7 +430,6 @@ OUTPUT FORMAT
 ====================================================
 {json_format_instruction}
 """
-        # Step 4: Add image_type hint to user query
         user_text = user_query or f"Please analyze this {image_type.replace('_', ' ').lower()} image in complete detail."
 
         messages = [
@@ -443,8 +443,8 @@ OUTPUT FORMAT
             }
         ]
         model = VISION_MODEL
-        temperature = 0.7  # ✅ INCREASED for more detailed responses
-        max_tokens = 3000  # ✅ EXPLICIT max tokens for longer responses
+        temperature = 0.5  # 🆕 LOWERED to prevent language drifting
+        max_tokens = 3000  
 
     # ─────────────────────────────────────────
     # TEXT FLOW — no image
@@ -457,30 +457,67 @@ OUTPUT FORMAT
             {"role": "user", "content": user_query}
         ]
         model = TEXT_MODEL
-        temperature = 0.7  # ✅ INCREASED for more detailed responses
-        max_tokens = 2000  # ✅ EXPLICIT max tokens for longer responses
+        temperature = 0.5  # 🆕 LOWERED to prevent language drifting
+        max_tokens = 2000  
 
     # ─────────────────────────────────────────
-    # Call Groq API
+    # Call Groq API & Robust JSON Parsing
     # ─────────────────────────────────────────
     try:
         completion = client.chat.completions.create(
             model=model,
             messages=messages,
-            temperature=temperature,  # ✅ Now higher for more detail
-            max_tokens=max_tokens,     # ✅ Now explicit for longer responses
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
 
-        result_text = completion.choices[0].message.content
+        result_text = completion.choices[0].message.content.strip()
+        parsed = None
 
-        # Safely extract JSON even if model adds conversational wrapping
-        json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
-        if json_match:
-            parsed = json.loads(json_match.group(0))
-        else:
-            parsed = json.loads(result_text)
+        # 1. Clean up markdown wrappers if model used them (e.g., ```json)
+        clean_text = result_text
+        if clean_text.startswith("```json"): clean_text = clean_text[7:]
+        if clean_text.startswith("```"): clean_text = clean_text[3:]
+        if clean_text.endswith("```"): clean_text = clean_text[:-3]
+        clean_text = clean_text.strip()
 
-        # Ensure image_type is always present in response
+        # 2. Isolate the JSON block using RegEx
+        json_match = re.search(r'\{[\s\S]*\}', clean_text)
+        extracted_json = json_match.group(0) if json_match else clean_text
+
+        # 3. Bulletproof Parsing Logic
+        try:
+            # First attempt: strict=False allows basic control characters
+            parsed = json.loads(extracted_json, strict=False)
+        except json.JSONDecodeError:
+            print("⚠️ Standard JSON parse failed. Attempting string repair...")
+            try:
+                # Fix unescaped control characters
+                repaired_json = extracted_json.replace('\n', '\\n').replace('\t', '\\t').replace('\r', '')
+                parsed = json.loads(repaired_json, strict=False)
+            except Exception as e:
+                print(f"⚠️ JSON repair failed: {e}")
+                pass
+
+        # 4. 🆕 ULTIMATE FALLBACK: If JSON is totally broken, rescue the text!
+        if not parsed or not isinstance(parsed, dict) or "response" not in parsed:
+            print("⚠️ ULTIMATE FALLBACK: Model returned plain text instead of JSON. Wrapping text manually.")
+            
+            # Quickly scan the text to assign a pseudo risk level
+            risk = "MEDIUM"
+            if "CRITICAL" in result_text.upper() or "HIGH RISK" in result_text.upper(): risk = "HIGH"
+            elif "LOW RISK" in result_text.upper() or "NORMAL" in result_text.upper(): risk = "LOW"
+            
+            # Manually build the JSON dictionary so React doesn't crash
+            parsed = {
+                "response": result_text, 
+                "risk_level": risk,
+                "explainability": "Analysis generated directly from model.",
+                "needs_map": False,
+                "image_type": image_type
+            }
+
+        # 5. Ensure image_type is present
         if "image_type" not in parsed:
             parsed["image_type"] = image_type
 
@@ -489,9 +526,9 @@ OUTPUT FORMAT
     except Exception as e:
         print(f"LLM Error: {e}")
         return {
-            "response": "I'm sorry, I couldn't process that request properly. Please try again.",
+            "response": f"I'm sorry, I encountered an error processing your detailed request. Please try asking again in {language}.",
             "risk_level": "LOW",
-            "explainability": str(e),
+            "explainability": f"System parsing error: {str(e)}",
             "needs_map": False,
-            "image_type": image_type,
+            "image_type": image_type if 'image_type' in locals() else "NONE",
         }

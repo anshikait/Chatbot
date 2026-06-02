@@ -305,6 +305,7 @@ async def chat(
         user_query=user_query,
         base64_image=base64_image,
         image_mime=image_mime,
+        language=language
     )
 
     response_text  = llm_output.get("response",      "Error generating response")

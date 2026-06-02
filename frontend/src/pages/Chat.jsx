@@ -2,10 +2,11 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { useToast } from '../components/Toast';
+import { useAudio } from '../hooks/useAudio'; // ✅ NEW: Audio hook
 import {
   Mic, Send, Paperclip, AlertTriangle, User,
   LogOut, Image as ImageIcon, Plus, MessageSquare,
-  FileText, X, Square, Pause, Play, RotateCcw,
+  FileText, X, Square, Pause, Play, RotateCcw, Volume2,
 } from 'lucide-react';
 import MapWidget from '../components/MapWidget';
 
@@ -22,6 +23,10 @@ const MSG_TYPE = {
 export default function Chat() {
   const navigate = useNavigate();
   const { toast } = useToast();
+
+  // ✅ NEW: Audio manager hook
+  const audio = useAudio();
+  const [playingMessageId, setPlayingMessageId] = useState(null); // Track which message's audio is playing
 
   const [messages, setMessages]                 = useState([]);
   const [sessions, setSessions]                 = useState([]);
@@ -71,12 +76,14 @@ export default function Chat() {
         const formatted = res.data.reduce((acc, m) => {
           if (m.message) {
             acc.push({
+              id: Math.random(), // ✅ NEW: Add unique ID for audio tracking
               role: 'user',
               parts: [{ type: MSG_TYPE.TEXT, text: m.message }],
             });
           }
           if (m.response) {
             acc.push({
+              id: Math.random(), // ✅ NEW: Add unique ID
               role: 'bot',
               parts: [{ type: MSG_TYPE.TEXT, text: m.response }],
               risk:          m.risk,
@@ -97,13 +104,14 @@ export default function Chat() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
-  // Cleanup on unmount
+  // ✅ FIXED: Stop audio only on unmount (empty dependency array)
   useEffect(() => {
     return () => {
       clearInterval(recordingTimerRef.current);
       stopStreamTracks();
+      audio.stop(); // ← Stop TTS audio on unmount
     };
-  }, []);
+  }, []); // ← Empty array - only run on unmount
 
   // ════════════════════════════════════════════════════════════
   // VOICE RECORDING — fully controlled
@@ -230,16 +238,53 @@ export default function Chat() {
     if (!file) return;
     setPendingReport({ file, name: file.name });
     e.target.value = '';
-    // PDF notice
     if (file.name.toLowerCase().endsWith('.pdf')) {
       toast('PDF selected — will be analyzed via page preview.', 'info');
     }
   };
 
   // ════════════════════════════════════════════════════════════
+  // ✅ NEW: Audio playback control
+  // ════════════════════════════════════════════════════════════
+  const playBotAudio = (messageId, base64Audio) => {
+    // Stop previous playback if any
+    audio.stop();
+    setPlayingMessageId(messageId);
+    
+    audio.play(base64Audio, 
+      () => {
+        // On play start
+        console.log('🔊 TTS audio started');
+      },
+      () => {
+        // On play end
+        console.log('✅ TTS audio finished');
+        setPlayingMessageId(null);
+      }
+    );
+  };
+
+  const pauseBotAudio = () => {
+    audio.pause();
+  };
+
+  const resumeBotAudio = () => {
+    audio.resume();
+  };
+
+  const stopBotAudio = () => {
+    audio.stop();
+    setPlayingMessageId(null);
+  };
+
+  // ════════════════════════════════════════════════════════════
   // MAIN SEND
   // ════════════════════════════════════════════════════════════
   const sendMessage = async () => {
+    // ✅ NEW: Stop audio playback before sending new message
+    audio.stop();
+    setPlayingMessageId(null);
+
     const finalText   = input.trim() || null;
     const finalImage  = pendingImage?.file  ?? null;
     const finalReport = pendingReport?.file ?? null;
@@ -261,7 +306,13 @@ export default function Chat() {
     setPendingAudioBlob(null);
     setPendingAudioUrl(null);
 
-    setMessages(prev => [...prev, { role: 'user', parts: userParts }]);
+    const newUserMessage = {
+      id: Math.random(), // ✅ NEW: Add unique ID
+      role: 'user',
+      parts: userParts
+    };
+
+    setMessages(prev => [...prev, newUserMessage]);
     setLoading(true);
 
     // Build FormData
@@ -284,7 +335,8 @@ export default function Chat() {
         loadSessions();
       }
 
-      setMessages(prev => [...prev, {
+      const newBotMessage = {
+        id: Math.random(), // ✅ NEW: Add unique ID
         role: 'bot',
         parts: [{ type: MSG_TYPE.TEXT, text: data.response }],
         risk:           data.risk_level,
@@ -292,12 +344,14 @@ export default function Chat() {
         needs_map:      data.needs_map,
         image_type:     data.image_type,
         audioBase64:    data.audio_base64,
-        userLocation:   data.user_location,  // ✅ Pass location from backend
-      }]);
+        userLocation:   data.user_location,
+      };
 
+      setMessages(prev => [...prev, newBotMessage]);
+
+      // ✅ NEW: Use audio manager instead of direct Audio()
       if (data.audio_base64) {
-        const snd = new Audio(`data:audio/mp3;base64,${data.audio_base64}`);
-        snd.play().catch(() => {});
+        playBotAudio(newBotMessage.id, data.audio_base64);
       }
 
       if (data.risk_level === 'HIGH') {
@@ -316,6 +370,7 @@ export default function Chat() {
         navigate('/login');
       }
       setMessages(prev => [...prev, {
+        id: Math.random(),
         role: 'bot',
         parts: [{ type: MSG_TYPE.TEXT, text: '⚠️ Sorry, something went wrong. Please try again.' }],
         risk: 'LOW',
@@ -333,6 +388,10 @@ export default function Chat() {
   };
 
   const startNewChat = () => {
+    // ✅ NEW: Stop audio when starting new chat
+    audio.stop();
+    setPlayingMessageId(null);
+
     setCurrentSessionId(null);
     setMessages([]);
     setPendingImage(null);
@@ -345,6 +404,8 @@ export default function Chat() {
     try {
       await api.post('/auth/logout');
     } catch {}
+    // ✅ NEW: Stop audio on logout
+    audio.stop();
     localStorage.removeItem('token');
     toast('Logged out successfully.', 'success');
     navigate('/');
@@ -455,7 +516,7 @@ export default function Chat() {
           )}
 
           {messages.map((msg, i) => (
-            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div key={msg.id || i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-2xl w-full p-4 rounded-2xl shadow-sm ${
                 msg.role === 'user'
                   ? 'bg-blue-600 text-white rounded-tr-sm ml-8'
@@ -495,12 +556,77 @@ export default function Chat() {
                       </p>
                     )}
 
+                    {/* ✅ NEW: Audio player with controls */}
                     {msg.audioBase64 && (
-                      <audio
-                        controls
-                        src={`data:audio/mp3;base64,${msg.audioBase64}`}
-                        className="h-10 w-full rounded outline-none"
-                      />
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                          <Volume2 size={16} className="text-blue-600 flex-shrink-0" />
+                          
+                          <div className="flex-1 space-y-1 min-w-0">
+                            {/* Time display */}
+                            <div className="text-xs text-gray-500">
+                              {playingMessageId === msg.id
+                                ? `${Math.floor(audio.state.currentTime)}s / ${Math.floor(audio.state.duration)}s`
+                                : 'Click play to listen'}
+                            </div>
+                            
+                            {/* Progress bar */}
+                            {playingMessageId === msg.id && (
+                              <input
+                                type="range"
+                                min="0"
+                                max={audio.state.duration || 0}
+                                value={audio.state.currentTime || 0}
+                                onChange={(e) => audio.seekTo(parseFloat(e.target.value))}
+                                className="w-full h-1 bg-blue-200 rounded cursor-pointer accent-blue-600"
+                              />
+                            )}
+                          </div>
+
+                          {/* Control buttons */}
+                          <div className="flex gap-1 flex-shrink-0">
+                            {playingMessageId !== msg.id ? (
+                              // Play button
+                              <button
+                                onClick={() => playBotAudio(msg.id, msg.audioBase64)}
+                                title="Play audio"
+                                className="p-1.5 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-600 transition"
+                              >
+                                <Play size={16} />
+                              </button>
+                            ) : audio.state.isPlaying ? (
+                              // Pause button
+                              <button
+                                onClick={pauseBotAudio}
+                                title="Pause audio"
+                                className="p-1.5 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-600 transition"
+                              >
+                                <Pause size={16} />
+                              </button>
+                            ) : audio.state.isPaused ? (
+                              // Resume button
+                              <button
+                                onClick={resumeBotAudio}
+                                title="Resume audio"
+                                className="p-1.5 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-600 transition"
+                              >
+                                <Play size={16} />
+                              </button>
+                            ) : null}
+
+                            {/* Stop button (shown when playing or paused) */}
+                            {playingMessageId === msg.id && (
+                              <button
+                                onClick={stopBotAudio}
+                                title="Stop audio"
+                                className="p-1.5 rounded-lg bg-red-100 hover:bg-red-200 text-red-600 transition"
+                              >
+                                <X size={16} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
                     )}
 
                     {msg.needs_map && <MapWidget userLocation={msg.userLocation} />}
